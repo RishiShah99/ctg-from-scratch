@@ -1,0 +1,8 @@
+ctg
+ctg.exe
+src/*.o
+*.obj
+*.exe
+.vscode/
+.vs/
+build/
