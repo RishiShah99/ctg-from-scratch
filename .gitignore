@@ -6,3 +6,5 @@ src/*.o
 .vscode/
 .vs/
 build/
+train.log
+out.log

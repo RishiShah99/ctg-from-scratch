@@ -9,23 +9,36 @@ Value::Value(double d, std::vector<ValuePtr> children, char o)
 
 ValuePtr v(double d) { return std::make_shared<Value>(d); }
 
-static void build_topo(const ValuePtr& node,
-                       std::unordered_set<Value*>& seen,
-                       std::vector<ValuePtr>& order) {
-    if (seen.count(node.get())) return;
-    seen.insert(node.get());
-    for (const auto& child : node->prev) build_topo(child, seen, order);
-    order.push_back(node);
-}
-
 void Value::backward() {
     std::vector<ValuePtr> topo;
     std::unordered_set<Value*> seen;
-    build_topo(shared_from_this(), seen, topo);
+
+    struct Frame { ValuePtr node; size_t idx; };
+    std::vector<Frame> stack;
+    stack.push_back({shared_from_this(), 0});
+
+    while (!stack.empty()) {
+        Frame& f = stack.back();
+        if (f.idx == 0) {
+            if (seen.count(f.node.get())) { stack.pop_back(); continue; }
+            seen.insert(f.node.get());
+        }
+        if (f.idx < f.node->prev.size()) {
+            ValuePtr next = f.node->prev[f.idx];
+            f.idx++;
+            stack.push_back({next, 0});
+        } else {
+            topo.push_back(f.node);
+            stack.pop_back();
+        }
+    }
+
     grad = 1.0;
     for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
         if ((*it)->backward_fn) (*it)->backward_fn();
     }
+
+    for (auto& node : topo) node->prev.clear();
 }
 
 ValuePtr operator+(const ValuePtr& a, const ValuePtr& b) {
