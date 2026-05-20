@@ -1,18 +1,24 @@
 CXX      := g++
 CXXFLAGS := -std=c++17 -O1 -Wall -Wextra
+DEMOFL   := -std=c++17 -O0 -Wall -Wextra
 LDFLAGS  := -Wl,--stack,268435456
 
-SRCS := $(wildcard src/*.cpp)
-OBJS := $(SRCS:.cpp=.o)
-BIN  := ctg
+COMMON_SRC := src/value.cpp src/nn.cpp src/data.cpp src/loss.cpp src/optim.cpp
+CTG_SRC    := $(COMMON_SRC) src/tabm.cpp src/tx.cpp src/main.cpp
+DEMO_SRC   := $(COMMON_SRC) src/demo.cpp
 
-$(BIN): $(OBJS)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+CTG  := ctg
+DEMO := demo
 
-src/%.o: src/%.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+all: $(CTG) $(DEMO)
+
+$(CTG): $(CTG_SRC)
+	$(CXX) $(CXXFLAGS) $(CTG_SRC) -o $@ $(LDFLAGS)
+
+$(DEMO): $(DEMO_SRC)
+	$(CXX) $(DEMOFL) $(DEMO_SRC) -o $@ $(LDFLAGS)
 
 clean:
-	rm -f src/*.o $(BIN) $(BIN).exe
+	rm -f src/*.o $(CTG) $(CTG).exe $(DEMO) $(DEMO).exe
 
-.PHONY: clean
+.PHONY: all clean

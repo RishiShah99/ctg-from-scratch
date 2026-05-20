@@ -8,4 +8,7 @@ src/*.o
 build/
 train.log
 out.log
+demo_out.log
+test_min.exe
 CTG.xls
+data/demo_mlp.bin
