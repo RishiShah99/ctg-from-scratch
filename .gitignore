@@ -12,3 +12,13 @@ demo_out.log
 test_min.exe
 CTG.xls
 data/demo_mlp.bin
+
+OhioT1DM/
+ShanghaTDM Data.zip
+data/
+
+results/
+
+viz/
+
+*.md
