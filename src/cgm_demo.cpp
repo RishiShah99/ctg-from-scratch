@@ -1,7 +1,7 @@
 #include "value.hpp"
-#include "s4d.hpp"
-#include "osdn.hpp"
 #include "cgm_data.hpp"
+#include "cgm_net.hpp"
+#include "osdn_blob.hpp"
 #include <iostream>
 #include <iomanip>
 #include <fstream>
@@ -29,10 +29,10 @@ namespace c {
 }
 
 struct Args {
-    std::string arch = "both";
+    std::string arch = "osdn";   // brain-mode story is OSDN-only by default
     std::string csv = "data/ohio_t1dm.csv";
-    std::string s4d_weights = "results/s4d-ohio.weights.bin";
-    std::string osdn_weights = "results/osdn-ohio.weights.bin";
+    std::string s4d_weights;     // optional; only loaded when --arch s4d|both
+    std::string osdn_weights = "results/osdn-brain-ohio-disjoint.weights.bin.best";
     int H = 16, N = 8;
     int lookback = 144, horizon = 12, step_min = 5;
     int post_bolus = 240;
@@ -42,7 +42,10 @@ struct Args {
     int n_show = 4;
     int score_max = 200;
     int osdn_layers = 1;
+    int input_channels = 7;
     uint32_t seed = 42;
+    std::string val_ids_csv  = "584,588";
+    std::string test_ids_csv = "591,596";
 };
 
 static Args parse(int argc, char** argv) {
@@ -66,94 +69,52 @@ static Args parse(int argc, char** argv) {
         else if (k == "--n-show") a.n_show = std::stoi(next());
         else if (k == "--score-max") a.score_max = std::stoi(next());
         else if (k == "--osdn-layers") a.osdn_layers = std::stoi(next());
+        else if (k == "--input-channels") a.input_channels = std::stoi(next());
         else if (k == "--seed") a.seed = static_cast<uint32_t>(std::stoul(next()));
+        else if (k == "--val-ids") a.val_ids_csv = next();
+        else if (k == "--test-ids") a.test_ids_csv = next();
         else { std::cerr << "unknown arg: " << k << "\n"; std::exit(2); }
     }
     return a;
 }
 
-struct Net {
-    int H;
-    std::string arch;
-    std::vector<ValuePtr> embed_w, embed_b;
-    std::unique_ptr<S4DLayer>  s4d;
-    std::vector<std::unique_ptr<OSDNLayer>> osdn_stack;
-    std::vector<ValuePtr> head_w;
-    ValuePtr head_b;
-
-    Net(const std::string& arch_, int H_, int N_, double dt_, int n_osdn_layers, std::mt19937& rng)
-        : H(H_), arch(arch_)
-    {
-        if (arch_ == "s4d") {
-            s4d = std::make_unique<S4DLayer>(H_, N_, dt_, rng);
-        } else {
-            int nl = n_osdn_layers > 0 ? n_osdn_layers : 1;
-            osdn_stack.reserve(nl);
-            for (int i = 0; i < nl; ++i)
-                osdn_stack.push_back(std::make_unique<OSDNLayer>(H_, N_, rng));
-        }
-        std::normal_distribution<double> n01(0.0, 1.0);
-        embed_w.resize(H_); embed_b.resize(H_); head_w.resize(H_);
-        double s = 1.0 / std::sqrt(static_cast<double>(H_));
-        for (int h = 0; h < H_; ++h) {
-            embed_w[h] = v(s * n01(rng));
-            embed_b[h] = v(0.0);
-            head_w[h]  = v(s * n01(rng));
-        }
-        head_b = v(0.0);
-    }
-
-    std::vector<ValuePtr> parameters() {
-        std::vector<ValuePtr> p;
-        for (auto& q : embed_w) p.push_back(q);
-        for (auto& q : embed_b) p.push_back(q);
-        if (arch == "s4d") {
-            for (auto& q : s4d->parameters()) p.push_back(q);
-        } else {
-            for (auto& layer : osdn_stack)
-                for (auto& q : layer->parameters()) p.push_back(q);
-        }
-        for (auto& q : head_w) p.push_back(q);
-        p.push_back(head_b);
-        return p;
-    }
-
-    ValuePtr forward(const std::vector<double>& sig) {
-        int L = static_cast<int>(sig.size());
-        std::vector<std::vector<ValuePtr>> x(L, std::vector<ValuePtr>(H));
-        for (int t = 0; t < L; ++t) {
-            ValuePtr xv = v(sig[t]);
-            for (int h = 0; h < H; ++h) x[t][h] = vtanh(embed_w[h] * xv + embed_b[h]);
-        }
-        std::vector<std::vector<ValuePtr>> y;
-        if (arch == "s4d") {
-            y = s4d->forward(x);
-        } else {
-            y = osdn_stack[0]->forward(x);
-            for (size_t i = 1; i < osdn_stack.size(); ++i) y = osdn_stack[i]->forward(y);
-        }
-        std::vector<ValuePtr> pool(H, v(0.0));
-        for (int t = 0; t < L; ++t) for (int h = 0; h < H; ++h) pool[h] = pool[h] + y[t][h];
-        double inv_L = 1.0 / static_cast<double>(L);
-        ValuePtr logit = head_b;
-        for (int h = 0; h < H; ++h) logit = logit + head_w[h] * (pool[h] * inv_L);
-        return logit;
-    }
-};
-
-static bool load_weights(Net& net, const std::string& path) {
+// Strict header-validating loader. Returns true on success, false on any
+// shape / version / magic / size mismatch — with the mismatch table printed
+// to stderr. The caller decides whether to abort or continue without this
+// model.
+static bool load_weights_strict(Net& net, const std::string& path,
+                                uint32_t H, uint32_t K, uint32_t D_in,
+                                uint32_t n_layers, const std::string& tag)
+{
     std::ifstream wf(path, std::ios::binary);
     if (!wf.is_open()) {
-        std::cerr << "  WARN: cannot open " << path << "\n";
+        std::cerr << "  [" << tag << "] cannot open " << path << "\n";
+        return false;
+    }
+    osdn_blob::Header h{};
+    std::string err;
+    if (!osdn_blob::read_header(wf, h, err)) {
+        std::cerr << "  [" << tag << "] " << path << ": " << err << "\n";
+        return false;
+    }
+    std::string shape_err;
+    if (!osdn_blob::shape_matches(h, H, K, D_in, n_layers, shape_err)) {
+        std::cerr << "  [" << tag << "] " << path
+                  << ": shape mismatch\n" << shape_err;
         return false;
     }
     auto params = net.parameters();
+    if (h.param_count != params.size()) {
+        std::cerr << "  [" << tag << "] " << path
+                  << ": header param_count " << h.param_count
+                  << " ≠ build expected " << params.size() << "\n";
+        return false;
+    }
     for (size_t i = 0; i < params.size(); ++i) {
         float fv = 0.0f;
-        wf.read(reinterpret_cast<char*>(&fv), sizeof(float));
-        if (!wf) {
-            std::cerr << "  WARN: weight file " << path << " truncated at param " << i
-                      << "/" << params.size() << "\n";
+        if (!wf.read(reinterpret_cast<char*>(&fv), sizeof(float))) {
+            std::cerr << "  [" << tag << "] " << path
+                      << ": short read at param " << i << "/" << params.size() << "\n";
             return false;
         }
         params[i]->data = static_cast<double>(fv);
@@ -162,6 +123,17 @@ static bool load_weights(Net& net, const std::string& path) {
 }
 
 static double sig(double z) { return 1.0 / (1.0 + std::exp(-z)); }
+
+static std::vector<std::string> split_ids(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : s) {
+        if (c == ',') { if (!cur.empty()) out.push_back(cur); cur.clear(); }
+        else if (!std::isspace(static_cast<unsigned char>(c))) cur.push_back(c);
+    }
+    if (!cur.empty()) out.push_back(cur);
+    return out;
+}
 
 static void plot_cgm(const std::vector<double>& bg, double hypo_thr) {
     const int W = 72, Hh = 8;
@@ -243,13 +215,17 @@ int main(int argc, char** argv) {
               << c::reset << "\n";
 
     auto records = load_cgm_csv(a.csv);
-    // Step 2 (patient-disjoint split): hardcode Ohio T1DM 8/2/2 split here.
-    // Step 5 will rewrite this demo around the strict header-validating loader.
     PatientSplitPolicy policy;
-    policy.val_ids  = {"584", "588"};
-    policy.test_ids = {"591", "596"};
-    auto ds = make_windows(records, a.lookback, a.horizon, a.step_min,
-                           a.hypo, a.post_bolus, policy, a.seed, a.window_stride);
+    policy.val_ids  = split_ids(a.val_ids_csv);
+    policy.test_ids = split_ids(a.test_ids_csv);
+    CGMDataset ds;
+    try {
+        ds = make_windows(records, a.lookback, a.horizon, a.step_min,
+                          a.hypo, a.post_bolus, policy, a.seed, a.window_stride);
+    } catch (const std::exception& e) {
+        std::cerr << "split error: " << e.what() << "\n";
+        return 2;
+    }
     std::vector<std::vector<double>> raw_lookback;
     raw_lookback.reserve(ds.test.size());
     for (const auto& w : ds.test) raw_lookback.push_back(w.lookback);
@@ -266,20 +242,35 @@ int main(int argc, char** argv) {
     std::mt19937 rng_o(456);
     std::unique_ptr<Net> s4d_net, osdn_net;
     if (want_s4d) {
-        s4d_net = std::make_unique<Net>("s4d", a.H, a.N, a.dt, 1, rng_s);
-        if (!load_weights(*s4d_net, a.s4d_weights)) want_s4d = false;
-        else std::cout << "  " << c::blue << "S4D" << c::reset << c::gray
-                       << "  loaded " << s4d_net->parameters().size()
-                       << " params from " << a.s4d_weights << c::reset << "\n";
+        if (a.s4d_weights.empty()) {
+            std::cerr << "  [S4D]  no --load-weights-s4d given; skipping S4D\n";
+            want_s4d = false;
+        } else {
+            s4d_net = std::make_unique<Net>("s4d", a.H, a.N, a.dt, 1,
+                                            a.input_channels, rng_s);
+            if (!load_weights_strict(*s4d_net, a.s4d_weights,
+                                     a.H, a.N, a.input_channels, 1, "S4D")) {
+                want_s4d = false;
+            } else {
+                std::cout << "  " << c::blue << "S4D" << c::reset << c::gray
+                          << "  loaded " << s4d_net->parameters().size()
+                          << " params from " << a.s4d_weights << c::reset << "\n";
+            }
+        }
     }
     if (want_osdn) {
-        osdn_net = std::make_unique<Net>("osdn", a.H, a.N, a.dt, a.osdn_layers, rng_o);
-        if (!load_weights(*osdn_net, a.osdn_weights)) want_osdn = false;
-        else std::cout << "  " << c::mag << "OSDN" << c::reset << c::gray
-                       << " loaded " << osdn_net->parameters().size()
-                       << " params from " << a.osdn_weights
-                       << " (" << a.osdn_layers << " layer" << (a.osdn_layers > 1 ? "s)" : ")")
-                       << c::reset << "\n";
+        osdn_net = std::make_unique<Net>("osdn", a.H, a.N, a.dt, a.osdn_layers,
+                                         a.input_channels, rng_o);
+        if (!load_weights_strict(*osdn_net, a.osdn_weights,
+                                 a.H, a.N, a.input_channels, a.osdn_layers, "OSDN")) {
+            want_osdn = false;
+        } else {
+            std::cout << "  " << c::mag << "OSDN" << c::reset << c::gray
+                      << " loaded " << osdn_net->parameters().size()
+                      << " params from " << a.osdn_weights
+                      << " (" << a.osdn_layers << " layer" << (a.osdn_layers > 1 ? "s)" : ")")
+                      << c::reset << "\n";
+        }
     }
     if (!want_s4d && !want_osdn) {
         std::cerr << "  no models loaded — abort\n";
@@ -294,8 +285,8 @@ int main(int argc, char** argv) {
     for (int i = 0; i < n_score; ++i) {
         ScoredWindow s;
         s.idx = i;
-        s.s4d_logit  = want_s4d  ? s4d_net->forward(ds.test[i].lookback)->data  : 0.0;
-        s.osdn_logit = want_osdn ? osdn_net->forward(ds.test[i].lookback)->data : 0.0;
+        s.s4d_logit  = want_s4d  ? s4d_net->forward(ds.test[i]).final_logit->data  : 0.0;
+        s.osdn_logit = want_osdn ? osdn_net->forward(ds.test[i]).final_logit->data : 0.0;
         scored.push_back(s);
     }
 
@@ -361,14 +352,14 @@ int main(int argc, char** argv) {
 
         if (want_s4d) {
             auto t0 = std::chrono::steady_clock::now();
-            double z = s4d_net->forward(w.lookback)->data;
+            double z = s4d_net->forward(w).final_logit->data;
             auto t1 = std::chrono::steady_clock::now();
             double ms = 1000.0 * std::chrono::duration<double>(t1 - t0).count();
             plot_prob_row("S4D", c::blue, sig(z), w.label, ms);
         }
         if (want_osdn) {
             auto t0 = std::chrono::steady_clock::now();
-            double z = osdn_net->forward(w.lookback)->data;
+            double z = osdn_net->forward(w).final_logit->data;
             auto t1 = std::chrono::steady_clock::now();
             double ms = 1000.0 * std::chrono::duration<double>(t1 - t0).count();
             plot_prob_row("OSDN", c::mag, sig(z), w.label, ms);
@@ -380,10 +371,13 @@ int main(int argc, char** argv) {
 
     std::cout << "\n  " << c::bold << c::white
               << "summary" << c::reset << c::gray
-              << "   S4D and OSDN both train end-to-end via scalar autograd in pure C++ stdlib."
+              << "   pure-C++ scalar autograd · brain-mode 7-channel features"
               << c::reset << "\n";
     std::cout << "  " << c::gray
-              << "        Same wrapper, same loss, same data — only the recurrent layer differs."
+              << "        weights loaded via header-validated osdn_blob format —"
+              << c::reset << "\n";
+    std::cout << "  " << c::gray
+              << "        any shape mismatch fails loudly, no silent garbled inference."
               << c::reset << "\n\n";
     return 0;
 }
