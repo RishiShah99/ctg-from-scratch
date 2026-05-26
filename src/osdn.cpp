@@ -51,8 +51,19 @@ std::vector<std::vector<ValuePtr>> OSDNLayer::forward(
     int L = static_cast<int>(x.size());
     std::vector<std::vector<ValuePtr>> y(L, std::vector<ValuePtr>(H));
 
-    std::vector<std::vector<ValuePtr>> S(K, std::vector<ValuePtr>(K, v(0.0)));
-    std::vector<ValuePtr> d(K, v(1.0));
+    // Initial state: distinct ValuePtr per cell. The vector fill-ctor would
+    // copy ONE shared_ptr K*K times, so every S[i][j] would alias the same
+    // Value and backprop would accumulate K*K gradient contributions onto a
+    // throwaway initial node. Subsequent forward writes create fresh nodes
+    // so the aliasing dissolves after t=0, but the cleaner construction
+    // makes intent obvious and removes a foot-gun if someone reads the
+    // initial state before the loop body.
+    std::vector<std::vector<ValuePtr>> S(K, std::vector<ValuePtr>(K));
+    std::vector<ValuePtr> d(K);
+    for (int i = 0; i < K; ++i) {
+        for (int j = 0; j < K; ++j) S[i][j] = v(0.0);
+        d[i] = v(1.0);
+    }
 
     std::vector<ValuePtr> lambda(K);
     for (int i = 0; i < K; ++i) lambda[i] = vsigmoid(log_lambda[i]);

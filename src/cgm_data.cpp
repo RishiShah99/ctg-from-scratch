@@ -149,10 +149,19 @@ CGMDataset make_windows(const std::vector<CGMRecord>& records,
         if (rec.t_min.size() < static_cast<size_t>(lookback_steps + horizon_steps + 2)) continue;
         for (size_t anchor = lookback_steps; anchor + horizon_steps < rec.t_min.size(); anchor += window_stride) {
             int64_t t_now = rec.t_min[anchor];
-            int64_t expected_min = rec.t_min[anchor - lookback_steps];
-            if ((t_now - expected_min) != static_cast<int64_t>((lookback_steps) * step_minutes)) continue;
-            int64_t expected_fwd = rec.t_min[anchor + horizon_steps];
-            if ((expected_fwd - t_now) != static_cast<int64_t>(horizon_steps * step_minutes)) continue;
+            // Regular-sampling validation: every adjacent pair in
+            // [anchor - lookback_steps, anchor + horizon_steps] must be
+            // exactly step_minutes apart. The endpoint-only check we used
+            // before missed a dropped-then-duplicated sample in the
+            // interior: total span still equaled lookback*step but the
+            // sequence was wrong.
+            bool reg = true;
+            const int64_t want_dt = static_cast<int64_t>(step_minutes);
+            for (size_t k = anchor - lookback_steps;
+                 k < anchor + horizon_steps && reg; ++k) {
+                if ((rec.t_min[k + 1] - rec.t_min[k]) != want_dt) reg = false;
+            }
+            if (!reg) continue;
 
             CGMWindow w;
             w.patient_id = rec.patient_id;

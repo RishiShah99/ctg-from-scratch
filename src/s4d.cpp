@@ -29,8 +29,25 @@ S4DLayer::S4DLayer(int H_, int N_, double dt_, std::mt19937& rng)
 std::vector<std::vector<ValuePtr>> S4DLayer::forward(
     const std::vector<std::vector<ValuePtr>>& x) const
 {
+    // Discretization is HYBRID, on purpose:
+    //   A_bar = exp(dt · A)                — Zero-Order Hold on A (set in ctor)
+    //   B is used as `dt · B` per step      — Explicit Euler on the input term
+    // Strict ZOH would use B_bar = A^{-1}(A_bar - I)B, but the Euler form is
+    // simpler, numerically well-behaved for the small dt used here (0.05),
+    // and is what the trainer was producing — switching now would invalidate
+    // every existing checkpoint. Documented; not changed.
+    //
+    // `dt * B[ch][n]` used to allocate a new Value inside every inner-loop
+    // iteration: L * H * N transient nodes per forward. Lift it: B is a
+    // learnable parameter, so Bdt must be recomputed at the START of each
+    // forward (Adam updates B between calls), but only ONCE per forward
+    // instead of L times.
     int L = static_cast<int>(x.size());
     std::vector<std::vector<ValuePtr>> y(L, std::vector<ValuePtr>(H));
+
+    std::vector<std::vector<ValuePtr>> Bdt(H, std::vector<ValuePtr>(N));
+    for (int ch = 0; ch < H; ++ch)
+        for (int n = 0; n < N; ++n) Bdt[ch][n] = dt * B[ch][n];
 
     std::vector<std::vector<ComplexValue>> h_state(
         H, std::vector<ComplexValue>(N, ComplexValue(0.0, 0.0)));
@@ -41,7 +58,7 @@ std::vector<std::vector<ValuePtr>> S4DLayer::forward(
             ValuePtr acc = v(0.0);
             for (int n = 0; n < N; ++n) {
                 h_state[ch][n] = A_bar[ch][n] * h_state[ch][n]
-                               + (dt * B[ch][n]) * u;
+                               + Bdt[ch][n] * u;
                 ComplexValue Ch = C[ch][n] * h_state[ch][n];
                 acc = acc + Ch.re;
             }

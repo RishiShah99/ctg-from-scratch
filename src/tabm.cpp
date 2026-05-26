@@ -43,9 +43,12 @@ std::vector<std::vector<ValuePtr>> BatchEnsembleLayer::forward(const std::vector
 }
 
 std::vector<ValuePtr> BatchEnsembleLayer::parameters() const {
+    // r_ holds the rank-1 sign vectors that the paper initializes to ±1
+    // and freezes thereafter. Including them in parameters() would let
+    // Adam push them off ±1, defeating the BatchEnsemble formulation.
+    // s_ and b_ remain learnable as the per-ensemble scale and bias.
     std::vector<ValuePtr> params;
     for (const auto& row : W_) for (const auto& w : row) params.push_back(w);
-    for (const auto& row : r_) for (const auto& r : row) params.push_back(r);
     for (const auto& row : s_) for (const auto& s : row) params.push_back(s);
     for (const auto& row : b_) for (const auto& b : row) params.push_back(b);
     return params;

@@ -118,7 +118,37 @@ int main(int argc, char** argv) {
               << "  wd=" << weight_decay
               << "  warmup=" << warmup_epochs << "\n\n";
 
+    // Inverse-frequency class weights from the training labels.
+    // The previous hard-coded {1.0, 1.0, 1.0} made cross_entropy_weighted
+    // a no-op disguised as a weighted loss — labels are imbalanced in
+    // CTG (class 2 is rare), so the model would learn to ignore it. We
+    // normalize so the average weight is 1.0, which keeps the loss scale
+    // comparable to the unweighted version.
     std::vector<double> class_weights(3, 1.0);
+    {
+        std::vector<size_t> count(3, 0);
+        for (int y : ds.y_train) {
+            if (y >= 0 && y < 3) count[static_cast<size_t>(y)]++;
+        }
+        double total = 0.0;
+        for (size_t i = 0; i < 3; ++i) total += static_cast<double>(count[i]);
+        if (total > 0.0) {
+            double mean = 0.0;
+            for (size_t i = 0; i < 3; ++i) {
+                if (count[i] == 0) class_weights[i] = 1.0;
+                else class_weights[i] = total / (3.0 * static_cast<double>(count[i]));
+                mean += class_weights[i];
+            }
+            mean /= 3.0;
+            // Renormalize so the average weight is 1.0 — preserves loss scale.
+            if (mean > 0.0) for (auto& w : class_weights) w /= mean;
+        }
+        std::cout << "  class_weights = ["
+                  << class_weights[0] << ", "
+                  << class_weights[1] << ", "
+                  << class_weights[2] << "]"
+                  << "  (counts " << count[0] << "/" << count[1] << "/" << count[2] << ")\n";
+    }
     std::vector<size_t> order(ds.X_train.size());
     std::iota(order.begin(), order.end(), 0);
 

@@ -850,27 +850,25 @@ int main(int argc, char** argv) {
         }
     }
 
-    auto compute_thr_at_spec = [&](double target_spec) -> std::pair<double, EvalReport> {
+    // Threshold selection: scan on VAL to pick thr@spec, then report metrics
+    // on TEST at that frozen threshold. Scanning on test would leak test
+    // labels into the threshold choice — dishonest for a deploy framing.
+    auto val_scored = compute_scores(net, ds.val);
+    auto pick_thr_on_val = [&](double target_spec) -> double {
         double best_thr = -1.0;
-        EvalReport best_r{};
-        best_r.recall = -1.0;
+        double best_recall = -1.0;
         for (double thr = 0.01; thr < 1.0; thr += 0.01) {
-            EvalReport r = evaluate_from_scores(test_scored, pos_w, thr);
-            if (r.specificity >= target_spec && r.recall > best_r.recall) {
+            EvalReport r = evaluate_from_scores(val_scored, pos_w, thr);
+            if (r.specificity >= target_spec && r.recall > best_recall) {
                 best_thr = thr;
-                best_r = r;
+                best_recall = r.recall;
             }
         }
-        if (best_thr < 0.0) {
-            best_thr = 0.5;
-            best_r = evaluate_from_scores(test_scored, pos_w, 0.5);
-        }
-        return { best_thr, best_r };
+        return best_thr >= 0.0 ? best_thr : 0.5;
     };
-    auto thr_pair = compute_thr_at_spec(0.80);
-    double thr80 = thr_pair.first;
-    EvalReport test_at_80 = thr_pair.second;
-    std::cout << "  threshold @ specificity=0.80 -> " << thr80 << "\n";
+    double thr80 = pick_thr_on_val(0.80);
+    EvalReport test_at_80 = evaluate_from_scores(test_scored, pos_w, thr80);
+    std::cout << "  threshold @ specificity=0.80 (picked on val) -> " << thr80 << "\n";
     print_eval("test (thr@spec80):", test_at_80);
 
     auto t_inf0 = std::chrono::steady_clock::now();

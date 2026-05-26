@@ -82,7 +82,16 @@ ValuePtr vpow(const ValuePtr& a, double exponent) {
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, exponent]() {
-        ap->grad += exponent * std::pow(ap->data, exponent - 1.0) * op->grad;
+        // For fractional exponents the derivative exponent*a^(exponent-1)
+        // blows up at a→0 (it's pow(0, negative) = inf). Clamp |a| away
+        // from zero with a tiny eps to keep gradients finite. For integer
+        // exponents the original expression is well-defined at zero, but
+        // the clamp doesn't change values when |a| ≥ eps so it's safe to
+        // apply uniformly.
+        const double eps = 1e-12;
+        double a_safe = ap->data;
+        if (std::fabs(a_safe) < eps) a_safe = (a_safe < 0.0 ? -eps : eps);
+        ap->grad += exponent * std::pow(a_safe, exponent - 1.0) * op->grad;
     };
     return out;
 }
