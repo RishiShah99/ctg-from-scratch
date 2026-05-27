@@ -36,7 +36,16 @@ static int g_meal_count = 0;
 static std::uint32_t g_now_min = 0;
 
 static constexpr int LED_PIN = 48;
-static constexpr float HYPO_LOGIT_THRESHOLD = 0.0f;
+
+// Alarm threshold in logit space. Derived from osdn-brain-ohio-clamped.json
+// test_thr_spec80.thr = 0.14 (the val-selected probability threshold that
+// achieves 80% specificity on the held-out val patients per the Step 8
+// thr-on-val fix). Logit form: logf(0.14 / 0.86) ≈ -1.8153.
+//
+// At this threshold the trained model achieves val recall 0.7182 and val
+// specificity 0.6771 — a deploy-honest predictive setpoint. Defaulting to
+// 0.0f (prob > 0.5) was rejected as too conservative for a predictive alarm.
+static constexpr float HYPO_LOGIT_THRESHOLD = -1.8153f;
 
 static float normalize(float mg_dl) {
     return (mg_dl - osdn_weights::MEAN_MG_DL) / osdn_weights::STD_MG_DL;
@@ -48,13 +57,9 @@ static void push_reading(float mg_dl) {
     if (g_ring_count < osdn_weights::LOOKBACK) g_ring_count++;
 }
 
-static float run_inference() {
-    static float sig[osdn_weights::LOOKBACK];
-    int n = g_ring_count;
-    int start = (g_ring_head - n + osdn_weights::LOOKBACK) % osdn_weights::LOOKBACK;
-    for (int t = 0; t < n; ++t) sig[t] = g_ring[(start + t) % osdn_weights::LOOKBACK];
-    return osdn_inf::forward(g_weights, g_state, sig, n);
-}
+// Static scratch buffer for the [L * 7] feature matrix. Lives in .bss
+// (LOOKBACK * 7 * 4 = 4032 B); no per-call allocation.
+static float g_feat[osdn_weights::LOOKBACK * 7];
 
 void setup() {
     Serial.begin(115200);
@@ -64,17 +69,24 @@ void setup() {
 
     bool ok = osdn_inf::load_blob(
         g_weights,
-        osdn_weights::H,
-        osdn_weights::K,
+        static_cast<int>(osdn_weights::BLOB_H),
+        static_cast<int>(osdn_weights::BLOB_K),
+        static_cast<int>(osdn_weights::BLOB_D_IN),
+        static_cast<int>(osdn_weights::BLOB_N_LAYERS),
         osdn_weights::BLOB,
         osdn_weights::BLOB_LEN);
 
-    Serial.printf("OSDN load: %s  H=%d K=%d L=%d  params=%u\n",
+    Serial.printf("OSDN load: %s  H=%u K=%u D_in=%u n_layers=%u L=%d  params=%u\n",
                   ok ? "ok" : "FAIL",
-                  osdn_weights::H, osdn_weights::K,
+                  static_cast<unsigned>(osdn_weights::BLOB_H),
+                  static_cast<unsigned>(osdn_weights::BLOB_K),
+                  static_cast<unsigned>(osdn_weights::BLOB_D_IN),
+                  static_cast<unsigned>(osdn_weights::BLOB_N_LAYERS),
                   osdn_weights::LOOKBACK,
                   static_cast<unsigned>(osdn_weights::BLOB_LEN));
-    osdn_inf::reset(g_state, osdn_weights::K);
+    osdn_inf::reset(g_state,
+                    static_cast<int>(osdn_weights::BLOB_K),
+                    static_cast<int>(osdn_weights::BLOB_N_LAYERS));
 }
 
 // Parse "<t_min> <amount>" from the tail of a `b` or `m` line. Returns
@@ -137,19 +149,35 @@ void loop() {
         float mg_dl = strtof(rest, nullptr);
         if (!(mg_dl > 20.0f && mg_dl < 600.0f)) break;
         push_reading(mg_dl);
-        // Single-channel inference path retained from baseline; commit 4
-        // replaces it with the 7-channel features::compute_window path.
-        if (g_ring_count >= osdn_weights::LOOKBACK) {
-            float logit = run_inference();
-            float prob  = 1.0f / (1.0f + expf(-logit));
-            bool alert = logit > HYPO_LOGIT_THRESHOLD;
-            digitalWrite(LED_PIN, alert ? HIGH : LOW);
-            Serial.printf("cgm=%.1f logit=%.4f prob=%.4f alert=%d t=%u\n",
-                          mg_dl, logit, prob, alert ? 1 : 0, g_now_min);
-        } else {
-            Serial.printf("cgm=%.1f buffering %d/%d t=%u\n",
+        if (g_ring_count < osdn_weights::LOOKBACK) {
+            Serial.printf("cgm=%.1f buffering %d/%d iob=0.00 cob=0.00 t=%u\n",
                           mg_dl, g_ring_count, osdn_weights::LOOKBACK, g_now_min);
+            break;
         }
+        // 7-channel inference. compute_window asserts its warmup
+        // precondition (g_count == LOOKBACK_STEPS && t_now_min >=
+        // (L-1)*STEP_MIN) — the buffering branch above gates on
+        // g_ring_count, and the replay tool/live deploy seed g_now_min
+        // before the lookback fills, so both invariants hold here.
+        features::compute_window(
+            g_ring, g_ring_head, g_ring_count,
+            g_iob,  g_iob_count,
+            g_meal, g_meal_count,
+            features::STEP_MIN, osdn_weights::LOOKBACK,
+            g_now_min, g_feat);
+        float logit = osdn_inf::forward(g_weights, g_state, g_feat,
+                                        osdn_weights::LOOKBACK);
+        float prob  = 1.0f / (1.0f + expf(-logit));
+        bool  alert = logit > HYPO_LOGIT_THRESHOLD;
+        digitalWrite(LED_PIN, alert ? HIGH : LOW);
+        // Surface iob/cob at the final lookback step for host-side
+        // cross-check against cgm_data.cpp's per-step features.
+        const int last = (osdn_weights::LOOKBACK - 1) * 7;
+        float iob_now = g_feat[last + 5];
+        float cob_now = g_feat[last + 6];
+        Serial.printf("cgm=%.1f logit=%.4f prob=%.4f alert=%d iob=%.2f cob=%.2f t=%u\n",
+                      mg_dl, logit, prob, alert ? 1 : 0,
+                      iob_now, cob_now, g_now_min);
         break;
     }
 
