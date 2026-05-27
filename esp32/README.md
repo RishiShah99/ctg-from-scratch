@@ -2,7 +2,22 @@
 
 PlatformIO project that runs the trained OSDN forward pass on a $4 ESP32-S3 microcontroller. CGM readings (mg/dL) are pushed over UART; an LED lights when the model predicts post-bolus hypoglycemia within the next `horizon_steps × step_min` minutes (60 minutes for the shipped Ohio brain-mode config: `horizon=12, step=5min`).
 
-> **Status note:** as of this commit the firmware is still on the single-channel feature path. Step 7 of the correctness pass switches it to the 7-channel feature vector (g, Δg, Δ²g, sin/cos(tod), IOB, COB) that brain-mode trains on. Until that lands, the device will not produce useful predictions from the current brain-mode `osdn_weights.cpp` blob.
+> **Status:** the deploy kernel (`src/osdn_inference.h`, mirrored byte-identical into `lib/osdn/`) is verified against the FP64 host autograd reference for the shipped brain-mode config — see [Shipped model](#shipped-model) below. The remaining open work is the firmware-side feature pipeline: `src/main.cpp` still consumes single-channel CGM readings and must be ported to the 7-channel feature vector (g, Δg, Δ²g, sin/cos(tod), IOB, COB) that brain-mode trains on. That port is Step 7 of the correctness pass and is tracked separately.
+
+## Shipped model
+
+Trained on Ohio T1DM with a patient-disjoint split (8 train / 2 val / 2 test). Results are reported on the held-out test patients; no leakage between splits.
+
+| metric | value |
+|---|---|
+| best validation AUROC | **0.9220** (epoch 12 / 16) |
+| **held-out test AUROC** | **0.7669** |
+| host↔device bit-identity | `diff = 7.97e-7` (tolerance 1e-4) |
+| inference time / window | 236 ms — **host CPU only** (MinGW g++ -O0); on-device ESP32 timing not yet measured (Step 7) |
+
+Shipped config: `H=16, K=8, D_in=7, n_layers=1, L=144`. Configs outside this envelope are not verified — the kernel header's preamble block lists the failing case (`K=16, n_layers=2` NaNs in FP32) for reference.
+
+The deploy kernel applies the paper's `Π_D` box projection on the preconditioner state after each d-update (`d[i] ∈ [0.5, 2.0]`), per §4.2 Eq (4) and Algorithm 1 of Zhou et al., *OSDN: Improving Delta Rule with Provable Online Preconditioning in Linear Attention*, arXiv:2605.13473v1. Without that clamp the FP32 kernel NaNs on trained weights — see `results/paper_analysis.md` for the diagnosis.
 
 ## Layout
 
@@ -28,12 +43,12 @@ pio device monitor -b 115200
 
 ## Generating the weight blob
 
-After a training run completes, e.g. the brain-mode Ohio-disjoint run:
+After a training run completes, e.g. the shipped Ohio brain-mode (clamped d-update) run:
 
 ```bash
 make blob_to_header
 ./blob_to_header.exe \
-    --in results/osdn-brain-ohio-disjoint.weights.bin.best \
+    --in results/osdn-brain-ohio-clamped.weights.bin.best \
     --out esp32/src/osdn_weights.cpp
 ```
 
@@ -42,7 +57,7 @@ make blob_to_header
 `MEAN_MG_DL`, `STD_MG_DL`, and `LOOKBACK` are still hand-maintained in `esp32/src/osdn_weights.h`; they come from the trainer's startup line:
 
 ```
-windows: train=4711  val=1568  test=1612  z=(157.6340,60.4122)
+windows: train=4694  val=1568  test=1612  z=(157.6580,60.4485)
                                             ↑mean       ↑sd
 ```
 
@@ -53,11 +68,22 @@ windows: train=4711  val=1568  test=1612  z=(157.6340,60.4122)
 ```bash
 make cgm_inference_test
 ./cgm_inference_test.exe \
-    --H 16 --K 8 --D-in 7 --n-layers 1 --L 144 \
-    --load-weights results/osdn-brain-ohio-disjoint.weights.bin.best
+    --H 16 --K 8 --D-in 7 --n-layers 1 --L 144 --seed 42 \
+    --load-weights results/osdn-brain-ohio-clamped.weights.bin.best
+```
+
+Expected output on the shipped config:
+
+```
+ref_logit = 3.30773131
+inf_logit = 3.30773211
+|diff|    = 7.97e-7
+PASS
 ```
 
 The test loads the brain-mode weights into both the host-autograd reference network (`RefNet` in `src/osdn_inference_test.cpp`) and the FP32 deploy kernel (`src/osdn_inference.h`), runs both on the same synthetic 7-channel input, and reports `|diff|`. Tolerance is 1e-4. A pass implies the same logic running on the ESP32 will reproduce host predictions to within FP32 rounding order (the device's FPU may reorder a multiply-add or two, but no operation differs algebraically).
+
+The verified envelope is documented in the kernel header preamble (`src/osdn_inference.h`). The shipped config (H=16, K=8, D_in=7, n_layers=1, L=144) passes at the diff above; the known-failing case (H=16, K=16, D_in=7, n_layers=2, L=144) is recorded there with the hypothesis for anyone extending the kernel later.
 
 If you only have a random-init synthetic run (no `--load-weights`), the test is still meaningful: it confirms the math + parameter ordering between trainer and kernel agree, just without the trained weight values.
 
