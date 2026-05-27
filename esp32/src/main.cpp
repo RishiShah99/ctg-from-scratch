@@ -77,24 +77,86 @@ void setup() {
     osdn_inf::reset(g_state, osdn_weights::K);
 }
 
+// Parse "<t_min> <amount>" from the tail of a `b` or `m` line. Returns
+// false (and emits an err line) on malformed input.
+static bool parse_t_amount(const char* p, std::uint32_t& t_min, float& amount) {
+    char* endp = nullptr;
+    unsigned long t = strtoul(p, &endp, 10);
+    if (endp == p) { Serial.println("err parse evt"); return false; }
+    const char* q = endp;
+    while (*q == ' ' || *q == '\t') ++q;
+    float a = strtof(q, &endp);
+    if (endp == q) { Serial.println("err parse evt"); return false; }
+    t_min = static_cast<std::uint32_t>(t);
+    amount = a;
+    return true;
+}
+
 void loop() {
-    if (Serial.available()) {
-        String line = Serial.readStringUntil('\n');
-        float mg_dl = line.toFloat();
-        if (mg_dl > 20.0f && mg_dl < 600.0f) {
-            push_reading(mg_dl);
-            if (g_ring_count >= osdn_weights::LOOKBACK) {
-                float logit = run_inference();
-                float prob  = 1.0f / (1.0f + expf(-logit));
-                bool alert = logit > HYPO_LOGIT_THRESHOLD;
-                digitalWrite(LED_PIN, alert ? HIGH : LOW);
-                Serial.printf("cgm=%.1f logit=%.4f prob=%.4f alert=%d\n",
-                              mg_dl, logit, prob, alert ? 1 : 0);
-            } else {
-                Serial.printf("cgm=%.1f buffering %d/%d\n",
-                              mg_dl, g_ring_count, osdn_weights::LOOKBACK);
-            }
-        }
+    if (!Serial.available()) { delay(10); return; }
+
+    String line = Serial.readStringUntil('\n');
+    line.trim();   // strips \r, leading/trailing whitespace
+    if (line.length() == 0) { delay(10); return; }
+
+    char cmd = line.charAt(0);
+    const char* rest = line.c_str() + 1;
+    while (*rest == ' ' || *rest == '\t') ++rest;
+
+    switch (cmd) {
+    case 't': {
+        // Set device clock. No future/past validation — host owns this.
+        char* endp = nullptr;
+        unsigned long t_min = strtoul(rest, &endp, 10);
+        if (endp == rest) { Serial.println("err parse t"); break; }
+        g_now_min = static_cast<std::uint32_t>(t_min);
+        break;
     }
+
+    case 'b': {
+        std::uint32_t t_min; float units;
+        if (!parse_t_amount(rest, t_min, units)) break;
+        if (t_min > g_now_min)         { Serial.println("err future evt"); break; }
+        if (units < 0.0f || units > 30.0f) { Serial.println("err bolus oor"); break; }
+        features::ring_append(g_iob, g_iob_head, g_iob_count, IOB_RING_N,
+                              t_min, units);
+        break;
+    }
+
+    case 'm': {
+        std::uint32_t t_min; float carbs;
+        if (!parse_t_amount(rest, t_min, carbs)) break;
+        if (t_min > g_now_min)            { Serial.println("err future evt"); break; }
+        if (carbs < 0.0f || carbs > 300.0f) { Serial.println("err meal oor");  break; }
+        features::ring_append(g_meal, g_meal_head, g_meal_count, MEAL_RING_N,
+                              t_min, carbs);
+        break;
+    }
+
+    case 'g': {
+        float mg_dl = strtof(rest, nullptr);
+        if (!(mg_dl > 20.0f && mg_dl < 600.0f)) break;
+        push_reading(mg_dl);
+        // Single-channel inference path retained from baseline; commit 4
+        // replaces it with the 7-channel features::compute_window path.
+        if (g_ring_count >= osdn_weights::LOOKBACK) {
+            float logit = run_inference();
+            float prob  = 1.0f / (1.0f + expf(-logit));
+            bool alert = logit > HYPO_LOGIT_THRESHOLD;
+            digitalWrite(LED_PIN, alert ? HIGH : LOW);
+            Serial.printf("cgm=%.1f logit=%.4f prob=%.4f alert=%d t=%u\n",
+                          mg_dl, logit, prob, alert ? 1 : 0, g_now_min);
+        } else {
+            Serial.printf("cgm=%.1f buffering %d/%d t=%u\n",
+                          mg_dl, g_ring_count, osdn_weights::LOOKBACK, g_now_min);
+        }
+        break;
+    }
+
+    default:
+        Serial.println("err unknown cmd");
+        break;
+    }
+
     delay(10);
 }
