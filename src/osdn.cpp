@@ -154,6 +154,12 @@ std::vector<std::vector<ValuePtr>> OSDNLayer::forward(
         for (int i = 0; i < K; ++i) {
             d[i] = d[i] + scale * k_sq[i];
         }
+        // Paper §4.2 Eq (4): d_{t+1} = Π_D(d̄_{t+1}) with D = [0.5, 2.0]^K.
+        // Algorithm 1 caption (page 5): "The box clamp realising Π_D is
+        // omitted for clarity." Without it, d drifts; once β·⟨d,k²⟩ leaves
+        // the stable band the gate magnitude grows and FP32 inference NaNs
+        // on trained weights. See results/paper_analysis.md.
+        for (int i = 0; i < K; ++i) d[i] = vclamp(d[i], 0.5, 2.0);
     }
 
     return y;

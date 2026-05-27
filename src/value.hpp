@@ -47,3 +47,4 @@ ValuePtr vrelu(const ValuePtr& a);
 ValuePtr vgelu(const ValuePtr& a);
 ValuePtr vsigmoid(const ValuePtr& a);
 ValuePtr vabs(const ValuePtr& a);
+ValuePtr vclamp(const ValuePtr& x, double lo, double hi);

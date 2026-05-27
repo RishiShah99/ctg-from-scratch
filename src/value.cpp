@@ -188,3 +188,11 @@ ValuePtr vabs(const ValuePtr& a) {
     };
     return out;
 }
+
+// clamp(x, lo, hi) built from vrelu only — inherits vrelu's tested backward,
+// so the subgradient at the box boundaries is whatever vrelu already does.
+//   clamp(x, lo, hi) = hi - vrelu((hi - lo) - vrelu(x - lo))
+// Verify by cases: x<lo → lo; lo≤x≤hi → x; x>hi → hi.
+ValuePtr vclamp(const ValuePtr& x, double lo, double hi) {
+    return hi - vrelu((hi - lo) - vrelu(x - lo));
+}

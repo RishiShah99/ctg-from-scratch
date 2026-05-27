@@ -224,6 +224,9 @@ inline void osdn_step(const OSDNLayerW& lw, OSDNLayerS& ls,
     const float norm_inv = 1.0f / norm;
     const float scale = ETA * beta * gate_term * norm_inv;
     for (int i = 0; i < K; ++i) ls.d[i] += scale * k_sq[i];
+    // Mirror of trainer's Π_D clamp (osdn.cpp) — paper §4.2, D = [0.5, 2.0]^K.
+    for (int i = 0; i < K; ++i)
+        ls.d[i] = std::fmax(0.5f, std::fmin(2.0f, ls.d[i]));
 }
 
 // Run the full forward pass. `feat` is [L * D_in] row-major: feat[t*D_in + c].
