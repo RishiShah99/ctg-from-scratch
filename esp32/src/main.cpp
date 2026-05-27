@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "osdn_inference.h"
 #include "osdn_weights.h"
+#include "features.h"
 
 using osdn_inf::H_MAX;
 using osdn_inf::K_MAX;
@@ -8,9 +9,31 @@ using osdn_inf::K_MAX;
 static osdn_inf::Weights g_weights;
 static osdn_inf::State   g_state;
 
+// CGM lookback ring (z-scored mg/dL). Sized to LOOKBACK = 144 samples.
 static float g_ring[osdn_weights::LOOKBACK];
-static int   g_ring_head = 0;
+static int   g_ring_head  = 0;
 static int   g_ring_count = 0;
+
+// Event rings. Sizes per results/step7_plan.md §3:
+//   - IOB ring at 128 entries covers the 600-min horizon with ≥6× headroom
+//     against Ohio T1DM worst-case bolus density (~20 events/10h).
+//   - COB ring at 96 entries covers the 480-min horizon with ≥30× headroom
+//     against ≤8 meals/8h.
+// RAM cost: (128 + 96) * 8 = 1.75 KB; negligible against 512 KB SRAM.
+// Overwrite policy: circular, silent. Correctness argument in plan §3.
+static constexpr int IOB_RING_N  = 128;
+static constexpr int MEAL_RING_N = 96;
+static features::Event g_iob[IOB_RING_N];
+static int g_iob_head  = 0;
+static int g_iob_count = 0;
+static features::Event g_meal[MEAL_RING_N];
+static int g_meal_head  = 0;
+static int g_meal_count = 0;
+
+// Device clock in minutes. Advances on `t <…>` lines from the host; the
+// replay tool pins this explicitly. Live deploy can derive from
+// millis() / 60000 once that path lands (out of scope for step 7).
+static std::uint32_t g_now_min = 0;
 
 static constexpr int LED_PIN = 48;
 static constexpr float HYPO_LOGIT_THRESHOLD = 0.0f;
