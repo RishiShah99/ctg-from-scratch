@@ -4,19 +4,17 @@
 
 namespace osdn_weights {
 
-// Legacy compile-time shape constants kept for the existing single-channel
-// firmware in esp32/src/main.cpp. Step 7 will switch the firmware to the
-// runtime BLOB_* values below (which come from osdn_blob's header) so the
-// constants and the blob can't disagree silently.
-static constexpr int   H          = 16;
-static constexpr int   K          = 8;
+// Compile-time constants the firmware uses outside the OSDN kernel.
+// LOOKBACK pinned to the trainer's --lookback. Norm stats lifted from
+// results/osdn-brain-ohio-clamped.json (norm_mean / norm_sd fields,
+// produced by Step 6 Tier-1 clamped re-train).
 static constexpr int   LOOKBACK   = 144;
-static constexpr float MEAN_MG_DL = 159.1924f;
-static constexpr float STD_MG_DL  = 57.8329f;
+static constexpr float MEAN_MG_DL = 157.6580f;
+static constexpr float STD_MG_DL  =  60.4485f;
 
-// Runtime shape constants emitted by blob_to_header from the blob header.
-// Firmware should prefer these over the legacy constexpr above; mismatch
-// means the blob has shifted away from the values main.cpp was built for.
+// Runtime shape constants emitted by blob_to_header from the blob's
+// 32-byte osdn_blob header. Firmware uses these (not compile-time
+// duplicates) so the constants and the blob can't disagree silently.
 extern const std::uint32_t BLOB_H;
 extern const std::uint32_t BLOB_K;
 extern const std::uint32_t BLOB_D_IN;
