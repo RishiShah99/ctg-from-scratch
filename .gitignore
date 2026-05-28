@@ -24,3 +24,6 @@ viz/
 *.md
 !README.md
 !**/README.md
+
+__pycache__/
+*.pyc
