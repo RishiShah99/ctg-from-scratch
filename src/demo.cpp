@@ -5,7 +5,6 @@
 #include "optim.hpp"
 #include <iostream>
 #include <iomanip>
-#include <fstream>
 #include <random>
 #include <algorithm>
 #include <numeric>
@@ -155,30 +154,6 @@ static void plot_activations(const std::vector<double>& vals,
     }
     std::cout << ansi::gray << "  [" << std::fixed << std::setprecision(2)
               << mn << ", " << mx << "]" << ansi::reset << "\n";
-}
-
-static void save_weights(const std::vector<ValuePtr>& params, const std::string& path) {
-    std::ofstream f(path, std::ios::binary);
-    size_t n = params.size();
-    f.write(reinterpret_cast<const char*>(&n), sizeof(n));
-    for (const auto& p : params) {
-        double d = p->data;
-        f.write(reinterpret_cast<const char*>(&d), sizeof(double));
-    }
-}
-
-static bool load_weights(std::vector<ValuePtr>& params, const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    size_t n = 0;
-    f.read(reinterpret_cast<char*>(&n), sizeof(n));
-    if (n != params.size()) return false;
-    for (auto& p : params) {
-        double d = 0.0;
-        f.read(reinterpret_cast<char*>(&d), sizeof(double));
-        p->data = d;
-    }
-    return true;
 }
 
 static double cosine_lr(double lr_max, double lr_min, int t, int T) {
@@ -344,7 +319,6 @@ int main(int argc, char** argv) {
     const std::string csv_path = (argc > 1) ? argv[1] : "data/CTG.csv";
     const uint32_t seed = 42;
     const std::vector<int> arch = {22, 32, 16, 3};
-    const std::string weights_path = "data/demo_mlp.bin";
 
     maybe_disable_colors();
 
@@ -360,14 +334,7 @@ int main(int argc, char** argv) {
     MLP net(arch, rng);
     auto params = net.parameters();
 
-    if (load_weights(params, weights_path)) {
-        std::cout << ansi::gray << "  loaded pre-trained weights ("
-                  << params.size() << " params)" << ansi::reset << "\n";
-    } else {
-        train_mlp(net, params, ds, seed);
-        save_weights(params, weights_path);
-        std::cout << ansi::gray << "  saved weights to " << weights_path << ansi::reset << "\n";
-    }
+    train_mlp(net, params, ds, seed);
 
     int idx_n = -1, idx_s = -1, idx_p = -1;
     for (size_t i = 0; i < ds.y_test.size(); ++i) {
