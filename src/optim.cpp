@@ -1,5 +1,6 @@
 #include "optim.hpp"
 #include <cmath>
+#include <iostream>
 
 Adam::Adam(std::vector<ValuePtr> params, double lr, double beta1, double beta2,
            double eps, double weight_decay)
@@ -26,6 +27,24 @@ void Adam::step() {
     for (size_t i = 0; i < params_.size(); ++i) {
         double g = params_[i]->grad;
         if (weight_decay_ != 0.0) g += weight_decay_ * params_[i]->data;
+        // Reject NaN/Inf gradients before they touch the moment buffers.
+        // A single non-finite g permanently poisons m_[i] / v_[i] (the
+        // EMAs absorb the NaN and never decay back), so subsequent steps
+        // on this parameter produce NaN updates regardless of how clean
+        // later gradients are. Skip-without-zeroing preserves the prior
+        // moment estimates; the next finite gradient updates from those.
+        if (!std::isfinite(g)) {
+            ++nonfinite_skip_count_;
+            if (!warned_nonfinite_) {
+                std::cerr << "  WARN: Adam saw non-finite gradient at param "
+                          << i << " step " << t_
+                          << " — skipping this param's update. Further "
+                             "skips will be counted silently; check "
+                             "nonfinite_grad_skips() at end of run.\n";
+                warned_nonfinite_ = true;
+            }
+            continue;
+        }
         m_[i] = beta1_ * m_[i] + (1.0 - beta1_) * g;
         v_[i] = beta2_ * v_[i] + (1.0 - beta2_) * g * g;
         double m_hat = m_[i] / bc1;
