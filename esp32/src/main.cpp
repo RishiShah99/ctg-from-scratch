@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <cmath>
 #include "osdn_inference.h"
 #include "osdn_weights.h"
 #include "features.h"
@@ -129,7 +130,13 @@ void loop() {
         std::uint32_t t_min; float units;
         if (!parse_t_amount(rest, t_min, units)) break;
         if (t_min > g_now_min)         { Serial.println("err future evt"); break; }
-        if (units < 0.0f || units > 30.0f) { Serial.println("err bolus oor"); break; }
+        // Range check via positive-form predicate so NaN / ±Inf are
+        // rejected (NaN compares unordered — a naive `units > 30.0f ||
+        // units < 0.0f` returns false for NaN, letting `strtof("nan")`
+        // poison the ring). See results/step7_review.md MAJOR-1.
+        if (!(std::isfinite(units) && units >= 0.0f && units <= 30.0f)) {
+            Serial.println("err bolus oor"); break;
+        }
         features::ring_append(g_iob, g_iob_head, g_iob_count, IOB_RING_N,
                               t_min, units);
         break;
@@ -139,7 +146,10 @@ void loop() {
         std::uint32_t t_min; float carbs;
         if (!parse_t_amount(rest, t_min, carbs)) break;
         if (t_min > g_now_min)            { Serial.println("err future evt"); break; }
-        if (carbs < 0.0f || carbs > 300.0f) { Serial.println("err meal oor");  break; }
+        // Same NaN/Inf guard as the `b` handler — see comment there.
+        if (!(std::isfinite(carbs) && carbs >= 0.0f && carbs <= 300.0f)) {
+            Serial.println("err meal oor"); break;
+        }
         features::ring_append(g_meal, g_meal_head, g_meal_count, MEAL_RING_N,
                               t_min, carbs);
         break;

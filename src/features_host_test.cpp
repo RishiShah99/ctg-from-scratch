@@ -196,5 +196,33 @@ int main() {
         return 1;
     }
     std::printf("PASS\n");
+
+    // ── NaN-poisoning case ────────────────────────────────────────
+    // Documents the failure mode that the esp32/src/main.cpp UART parser
+    // (`b` and `m` handlers) guards against with std::isfinite(). If a
+    // NaN somehow reaches the IOB ring, every subsequent compute_window
+    // output cell touched by that event becomes NaN — and the alarm
+    // gate `logit > HYPO_LOGIT_THRESHOLD` evaluates to false on NaN
+    // (silent miss). See results/step7_review.md MAJOR-1.
+    //
+    // This test does NOT replicate the UART parser; it directly injects
+    // a NaN event into the ring and asserts the poisoning propagates.
+    // The guard's contract is: "no NaN event can reach this ring."
+    features::Event iob_nan[1] = { { 4900u, std::nanf("") } };
+    static float out_nan[L * 7];
+    features::compute_window(g_ring_f, g_head, g_count,
+                             iob_nan, 1, meal, meal_count,
+                             STEP, L, t_now, out_nan);
+    bool saw_nan_in_iob = false;
+    for (int t = 0; t < L; ++t) {
+        if (std::isnan(out_nan[t * 7 + 5])) { saw_nan_in_iob = true; break; }
+    }
+    if (!saw_nan_in_iob) {
+        std::printf("nan-poison FAIL: expected NaN in iob channel after "
+                    "injecting NaN-amount event\n");
+        return 1;
+    }
+    std::printf("nan-poison PASS: NaN propagates through iob channel as "
+                "expected (UART guard prevents this in deploy)\n");
     return 0;
 }
