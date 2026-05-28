@@ -1,6 +1,6 @@
 # cgm-on-chip
 
-**A recent linear-attention architecture, reimplemented from scratch in pure C++ with its own autograd engine, trained on real clinical data, and run on a $4 microcontroller to predict hypoglycemia 60 minutes ahead.**
+OSDN, a brand-new linear-attention model that learns to tune its own memory as it reads (AdaGrad for the architectures trying to replace the transformer), alongside S4D (a proven state-space model from the line that led to Mamba), both reimplemented from scratch in pure C++ with their own autograd engine, trained on real clinical data, and run on a $4 microcontroller to predict hypoglycemia 60 minutes ahead.
 
 Everything in this repository is built from the C++17 standard library. No PyTorch, no TensorFlow, no Eigen, no BLAS, no OpenMP. The automatic differentiation engine, the optimizer, the multi-threaded trainer, the data pipeline, two model architectures, the on-disk weight format, the embedded inference kernel, and a triple-redundant correctness proof tying them together are roughly 5,500 lines of C++.
 
