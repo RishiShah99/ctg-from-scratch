@@ -9,11 +9,14 @@ command UART protocol (g/b/m/t) understood by esp32/src/main.cpp:
     m <t_min> <carbs>  meal event
     t <t_min>          set device clock
 
-For each glucose record the script first sends `t <t_min>` to pin the
-device clock, then `g <glucose>`. For each bolus/meal record it sends
-the matching event line. At `--speedup 1` the gap between glucose
-samples is the trainer's 5-min cadence (300 s wall time); higher
-speedup compresses that proportionally.
+Every event line (g/b/m) is preceded by a `t <t_min>` advance so the
+firmware's `t_min > g_now_min` future-event guard never trips. Boluses
+and meals that precede the first glucose sample in the Ohio CSV
+(treatments are logged before the sensor starts streaming) used to be
+silently dropped; the pre-emit fix back-fills them in order. At
+`--speedup 1` the gap between glucose samples is the trainer's 5-min
+cadence (300 s wall time); higher speedup compresses that
+proportionally.
 
 Requires pyserial (`pip install pyserial`). No other dependencies.
 
@@ -186,17 +189,19 @@ def main() -> int:
 
         capture_cols = ["t_min", "cgm", "logit", "prob", "alert", "iob", "cob"]
         captured: list[dict] = []
-        last_t_min = 0
         windows_emitted = 0
 
         try:
             for t_min, kind, value in records:
+                # Pre-emit `t` before every event so the firmware's
+                # `t_min > g_now_min` future-event guard accepts events
+                # that precede the first glucose sample (Ohio sessions
+                # often start with several boluses/meals before the CGM
+                # comes online). See results/step7_review.md MAJOR-2.
+                send(f"t {t_min}")
                 if kind in ("b", "m"):
                     send(f"{kind} {t_min} {value:.4f}")
                 elif kind == "g":
-                    if t_min != last_t_min:
-                        send(f"t {t_min}")
-                        last_t_min = t_min
                     send(f"g {value:.4f}")
                     if inter_sample_s > 0:
                         time.sleep(inter_sample_s)
