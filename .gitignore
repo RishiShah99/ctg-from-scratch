@@ -21,8 +21,11 @@ results/
 viz/
 
 *.md
-!README.md
-!**/README.md
+!/README.md
+
+.claude/
+.env
+.env.*
 
 __pycache__/
 *.pyc
