@@ -1,6 +1,4 @@
 #include "value.hpp"
-#include "s4d.hpp"
-#include "osdn.hpp"
 #include "optim.hpp"
 #include "cgm_data.hpp"
 #include "osdn_blob.hpp"
