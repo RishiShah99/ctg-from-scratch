@@ -82,16 +82,21 @@ ValuePtr vpow(const ValuePtr& a, double exponent) {
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, exponent]() {
-        // For fractional exponents the derivative exponent*a^(exponent-1)
-        // blows up at a→0 (it's pow(0, negative) = inf). Clamp |a| away
-        // from zero with a tiny eps to keep gradients finite. For integer
-        // exponents the original expression is well-defined at zero, but
-        // the clamp doesn't change values when |a| ≥ eps so it's safe to
-        // apply uniformly.
-        const double eps = 1e-12;
-        double a_safe = ap->data;
-        if (std::fabs(a_safe) < eps) a_safe = (a_safe < 0.0 ? -eps : eps);
-        ap->grad += exponent * std::pow(a_safe, exponent - 1.0) * op->grad;
+        // d/da a^p = p · a^(p-1). At a == 0:
+        //   p > 1 → 0 (well-defined)
+        //   p == 1 → 1
+        //   p == 0 → 0 (function is constant 1)
+        //   p < 1  → divergent or undefined; emit 0 as a no-signal sentinel
+        //           (propagating ±inf would poison Adam's moments and the
+        //           divergence carries no useful descent direction).
+        // For any nonzero a, evaluate directly with no clamp; extreme
+        // magnitudes are handled by Adam's NaN/Inf reject downstream.
+        double a_val = ap->data;
+        if (a_val == 0.0) {
+            if (exponent == 1.0) ap->grad += op->grad;
+            return;
+        }
+        ap->grad += exponent * std::pow(a_val, exponent - 1.0) * op->grad;
     };
     return out;
 }
