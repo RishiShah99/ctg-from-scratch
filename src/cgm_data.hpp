@@ -55,4 +55,13 @@ CGMDataset make_windows(const std::vector<CGMRecord>& records,
                         uint32_t seed,
                         int window_stride = 1);
 
-void normalize_inplace(CGMDataset& ds, double& out_mean, double& out_std);
+struct NormStats {
+    double cgm_mean;
+    double cgm_std;
+    double iob_mean;
+    double iob_std;
+    double cob_mean;
+    double cob_std;
+};
+
+void normalize_inplace(CGMDataset& ds, NormStats& out_stats);

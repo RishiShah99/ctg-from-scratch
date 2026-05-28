@@ -349,8 +349,10 @@ int main(int argc, char** argv) {
               << "  train=[" << join_ids(fold_ids(ds.train)) << "]"
               << "  val=["   << join_ids(fold_ids(ds.val))   << "]"
               << "  test=["  << join_ids(fold_ids(ds.test))  << "]\n";
-    double mean = 0.0, sd = 1.0;
-    normalize_inplace(ds, mean, sd);
+    NormStats norm_stats{};
+    normalize_inplace(ds, norm_stats);
+    const double mean = norm_stats.cgm_mean;
+    const double sd   = norm_stats.cgm_std;
 
     int n_pos = 0, n_neg = 0;
     for (const auto& w : ds.train) { (w.label == 1 ? n_pos : n_neg)++; }

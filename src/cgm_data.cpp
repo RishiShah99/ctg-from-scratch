@@ -263,7 +263,7 @@ CGMDataset make_windows(const std::vector<CGMRecord>& records,
     return ds;
 }
 
-void normalize_inplace(CGMDataset& ds, double& out_mean, double& out_std) {
+void normalize_inplace(CGMDataset& ds, NormStats& out_stats) {
     double sum = 0.0, sqsum = 0.0; size_t cnt = 0;
     for (const auto& w : ds.train) {
         for (double g : w.lookback) { sum += g; sqsum += g * g; cnt++; }
@@ -271,7 +271,8 @@ void normalize_inplace(CGMDataset& ds, double& out_mean, double& out_std) {
     double mean = cnt > 0 ? sum / static_cast<double>(cnt) : 0.0;
     double var  = cnt > 0 ? sqsum / static_cast<double>(cnt) - mean * mean : 1.0;
     double std_dev = std::sqrt(std::max(1e-12, var));
-    out_mean = mean; out_std = std_dev;
+    out_stats.cgm_mean = mean;
+    out_stats.cgm_std  = std_dev;
 
     auto apply = [&](std::vector<CGMWindow>& set) {
         for (auto& w : set) for (auto& g : w.lookback) g = (g - mean) / std_dev;
@@ -290,6 +291,10 @@ void normalize_inplace(CGMDataset& ds, double& out_mean, double& out_std) {
     double cob_mean = cob_cnt > 0 ? cob_sum / cob_cnt : 0.0;
     double cob_var  = cob_cnt > 0 ? cob_sqsum / cob_cnt - cob_mean * cob_mean : 1.0;
     double cob_std  = std::sqrt(std::max(1e-6, cob_var));
+    out_stats.iob_mean = iob_mean;
+    out_stats.iob_std  = iob_std;
+    out_stats.cob_mean = cob_mean;
+    out_stats.cob_std  = cob_std;
 
     auto apply_ic = [&](std::vector<CGMWindow>& set) {
         for (auto& w : set) {

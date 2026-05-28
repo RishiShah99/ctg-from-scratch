@@ -13,6 +13,7 @@
 // channel is iob at the steepest decay step, around 5e-6.
 //
 #include "../esp32/src/features.h"
+#include "../esp32/src/osdn_weights.h"
 
 #include <cmath>
 #include <cstdint>
@@ -79,7 +80,14 @@ void reference_window(const double* g_ring_dbl,
             iob_acc += static_cast<double>(iob_ring[j].amount) *
                        std::exp(-dt / TAU_IOB);
         }
-        const double iob = iob_acc / IOB_SCALE;
+        // Mirror the firmware's post-/SCALE z-score (esp32/src/features.cpp
+        // — see osdn_weights::IOB_MEAN/STD). Trainer source:
+        // src/cgm_data.cpp:296. Use the same fp32-rounded constants the
+        // firmware uses, cast to double, so the only intentional drift
+        // between the two is float-vs-double accumulator precision.
+        const double iob = (iob_acc / IOB_SCALE -
+                            static_cast<double>(osdn_weights::IOB_MEAN)) /
+                           static_cast<double>(osdn_weights::IOB_STD);
 
         double cob_acc = 0.0;
         for (int j = 0; j < meal_count; ++j) {
@@ -90,7 +98,10 @@ void reference_window(const double* g_ring_dbl,
             cob_acc += static_cast<double>(meal_ring[j].amount) *
                        std::exp(-dt / TAU_COB);
         }
-        const double cob = cob_acc / COB_SCALE;
+        // Mirror src/cgm_data.cpp:297 — trainer z-scores COB the same way.
+        const double cob = (cob_acc / COB_SCALE -
+                            static_cast<double>(osdn_weights::COB_MEAN)) /
+                           static_cast<double>(osdn_weights::COB_STD);
 
         out_LxD[t_lb * 7 + 0] = g_t;
         out_LxD[t_lb * 7 + 1] = dg;

@@ -12,6 +12,7 @@ CGM_TRAIN_SRC := src/value.cpp src/loss.cpp src/optim.cpp src/complex_value.cpp 
 CGM_INFTEST_SRC := src/value.cpp src/osdn.cpp src/osdn_inference_test.cpp
 FEATTEST_SRC    := esp32/src/features.cpp src/features_host_test.cpp
 BLOB2H_SRC      := src/blob_to_header.cpp
+NORMSTATS_SRC   := src/cgm_data.cpp tools/extract_norm_stats.cpp
 
 CTG          := ctg
 DEMO         := demo
@@ -21,6 +22,7 @@ CGM_TRAIN    := cgm_train
 CGM_INFTEST  := cgm_inference_test
 FEATTEST     := features_host_test
 BLOB2H       := blob_to_header
+NORMSTATS    := extract_norm_stats
 
 all: $(CTG) $(DEMO)
 
@@ -48,6 +50,9 @@ $(FEATTEST): $(FEATTEST_SRC) esp32/src/features.h
 $(BLOB2H): $(BLOB2H_SRC)
 	$(CXX) $(CXXFLAGS) $(BLOB2H_SRC) -o $@ $(LDFLAGS)
 
+$(NORMSTATS): $(NORMSTATS_SRC) src/cgm_data.hpp
+	$(CXX) $(DEMOFL) $(NORMSTATS_SRC) -o $@ $(LDFLAGS)
+
 clean:
 	rm -f src/*.o \
 	      $(CTG) $(CTG).exe \
@@ -57,6 +62,7 @@ clean:
 	      $(CGM_TRAIN) $(CGM_TRAIN).exe \
 	      $(CGM_INFTEST) $(CGM_INFTEST).exe \
 	      $(FEATTEST) $(FEATTEST).exe \
-	      $(BLOB2H) $(BLOB2H).exe
+	      $(BLOB2H) $(BLOB2H).exe \
+	      $(NORMSTATS) $(NORMSTATS).exe
 
 .PHONY: all clean

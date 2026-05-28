@@ -1,4 +1,5 @@
 #include "features.h"
+#include "osdn_weights.h"
 
 #include <cassert>
 #include <cmath>
@@ -70,7 +71,11 @@ inline void compute_row(const float* g_ring, int g_head, int g_count,
         if (dt > IOB_HORIZON_MIN) continue;
         iob_acc += e.amount * std::exp(-dt / TAU_IOB);
     }
-    const float iob = iob_acc / IOB_SCALE;
+    // Mirror src/cgm_data.cpp:296 — trainer z-scores IOB per-feature in
+    // normalize_inplace before training. Constants extracted via
+    // tools/extract_norm_stats.exe; see esp32/src/osdn_weights.h.
+    const float iob = (iob_acc / IOB_SCALE - osdn_weights::IOB_MEAN) /
+                      osdn_weights::IOB_STD;
 
     float cob_acc = 0.0f;
     for (int j = 0; j < meal_count; ++j) {
@@ -80,7 +85,9 @@ inline void compute_row(const float* g_ring, int g_head, int g_count,
         if (dt > COB_HORIZON_MIN) continue;
         cob_acc += e.amount * std::exp(-dt / TAU_COB);
     }
-    const float cob = cob_acc / COB_SCALE;
+    // Mirror src/cgm_data.cpp:297 — trainer z-scores COB the same way.
+    const float cob = (cob_acc / COB_SCALE - osdn_weights::COB_MEAN) /
+                      osdn_weights::COB_STD;
 
     out_row[0] = g_t;
     out_row[1] = dg;

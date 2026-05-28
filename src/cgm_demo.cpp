@@ -229,8 +229,10 @@ int main(int argc, char** argv) {
     std::vector<std::vector<double>> raw_lookback;
     raw_lookback.reserve(ds.test.size());
     for (const auto& w : ds.test) raw_lookback.push_back(w.lookback);
-    double mean = 0.0, std_ = 1.0;
-    normalize_inplace(ds, mean, std_);
+    NormStats norm_stats{};
+    normalize_inplace(ds, norm_stats);
+    const double mean = norm_stats.cgm_mean;
+    const double std_ = norm_stats.cgm_std;
     std::cout << "  " << c::gray << "loaded " << records.size() << " patients · "
               << ds.test.size() << " test windows · z=(" << std::fixed << std::setprecision(2)
               << mean << "," << std_ << ")" << c::reset << "\n";
