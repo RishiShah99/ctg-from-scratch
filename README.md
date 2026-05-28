@@ -6,8 +6,6 @@ Everything in this repository is built from the C++17 standard library. No PyTor
 
 The shipped artifact is a trained model whose FP32 inference kernel runs on an **ESP32-S3 in 20% of its RAM**, raising a hypoglycemia alarm an hour before onset, verified to agree with the FP64 training reference to **8 decimal places**.
 
----
-
 ## Overview
 
 Each layer below is something most stacks would simply `import`. The work here was building the whole thing from primitives.
@@ -37,8 +35,6 @@ A header-only **FP32 inference kernel** (`src/osdn_inference.h`, 297 lines): all
 
 The **ESP32-S3 firmware** (roughly 716 lines) is a complete on-device alarm: a serial protocol for glucose, bolus, and meal events, on-device feature recomputation matching the trainer byte for byte, and a **fail-open clinical alarm** in which a non-finite logit raises the alarm rather than silently passing, because "I don't know" must surface on a medical predictor. The firmware feature module is tested by compiling the actual production code into a host binary and checking it against a double-precision reference (`src/features_host_test.cpp`, maximum difference 4.8e-7). Footprint: **RAM 20.1%, Flash 8.4%**.
 
----
-
 ## Results
 
 Patient-disjoint Ohio T1DM, validation = {584, 588}, test = {591, 596}, 8 train / 2 validation / 2 test patients. Identical wrapper network across both architectures (7-channel input, H=16, lookback=144 of about 12 hours, horizon=12 of about 60 minutes ahead, stride=12, seed=42).
@@ -54,8 +50,6 @@ FP32 device kernel agreement with the FP64 host autograd: **|diff| = 7.97e-7** (
 
 Read the validation-to-test gaps rather than the point estimates: with **n=2 test patients**, absolute AUROC is high-variance. Full caveats are below.
 
----
-
 ## Quickstart (fresh clone, no data needed)
 
 ```sh
@@ -65,8 +59,6 @@ make grad_check && ./grad_check
 ```
 
 The Ohio T1DM dataset requires a data-use agreement and is not redistributable. The `make check` trained-weight bit-identity gate needs the locked weight blob, but the build, the gradient check, and the random-init agreement test all run on a bare clone.
-
----
 
 ## Limitations
 
@@ -88,8 +80,6 @@ The Ohio T1DM dataset requires a data-use agreement and is not redistributable. 
 - **No on-device hardware validation yet.** The firmware compiles for and deploys to the ESP32-S3, and the kernel is verified bit-equivalent to the trainer host-side; end-to-end replay on physical hardware is future work.
 - **"Bit-equivalence" means FP32 / FP64 agreement within rounding** (7.97e-7 at tolerance 1e-4), reported to 8 digits for drift detection, not a claim of identical bits.
 
----
-
 ## Future work
 
 The limitations above map directly onto the second stage of this project:
@@ -100,8 +90,6 @@ The limitations above map directly onto the second stage of this project:
 - **On-device hardware validation**: replaying a held-out patient's glucose trace into the ESP32-S3 over the serial protocol and confirming the on-chip alarm fires against host expectations, closing the loop from trained weights to a physical device.
 
 The pipeline is built to absorb these without structural change: the split policy, normalization, and evaluation are already isolated behind the trainer's configuration, so stage two is a matter of running the existing machinery across more folds and seeds rather than rebuilding it.
-
----
 
 ## Data citation
 
