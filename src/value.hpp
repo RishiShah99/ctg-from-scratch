@@ -12,10 +12,9 @@ public:
     double grad = 0.0;
     std::vector<ValuePtr> prev;
     std::function<void()> backward_fn;
-    char op = ' ';
 
     explicit Value(double d);
-    Value(double d, std::vector<ValuePtr> children, char o);
+    Value(double d, std::vector<ValuePtr> children);
 
     void backward();
 };

@@ -4,8 +4,8 @@
 
 Value::Value(double d) : data(d) {}
 
-Value::Value(double d, std::vector<ValuePtr> children, char o)
-    : data(d), prev(std::move(children)), op(o) {}
+Value::Value(double d, std::vector<ValuePtr> children)
+    : data(d), prev(std::move(children)) {}
 
 ValuePtr v(double d) { return std::make_shared<Value>(d); }
 
@@ -42,7 +42,7 @@ void Value::backward() {
 }
 
 ValuePtr operator+(const ValuePtr& a, const ValuePtr& b) {
-    auto out = std::make_shared<Value>(a->data + b->data, std::vector<ValuePtr>{a, b}, '+');
+    auto out = std::make_shared<Value>(a->data + b->data, std::vector<ValuePtr>{a, b});
     Value* ap = a.get();
     Value* bp = b.get();
     Value* op = out.get();
@@ -57,7 +57,7 @@ ValuePtr operator+(const ValuePtr& a, double b) { return a + v(b); }
 ValuePtr operator+(double a, const ValuePtr& b) { return v(a) + b; }
 
 ValuePtr operator*(const ValuePtr& a, const ValuePtr& b) {
-    auto out = std::make_shared<Value>(a->data * b->data, std::vector<ValuePtr>{a, b}, '*');
+    auto out = std::make_shared<Value>(a->data * b->data, std::vector<ValuePtr>{a, b});
     Value* ap = a.get();
     Value* bp = b.get();
     Value* op = out.get();
@@ -78,7 +78,7 @@ ValuePtr operator-(double a, const ValuePtr& b) { return v(a) + (-b); }
 
 ValuePtr vpow(const ValuePtr& a, double exponent) {
     auto out = std::make_shared<Value>(std::pow(a->data, exponent),
-                                       std::vector<ValuePtr>{a}, '^');
+                                       std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, exponent]() {
@@ -102,7 +102,7 @@ ValuePtr operator/(double a, const ValuePtr& b) { return v(a) * vpow(b, -1.0); }
 
 ValuePtr vexp(const ValuePtr& a) {
     double e = std::exp(a->data);
-    auto out = std::make_shared<Value>(e, std::vector<ValuePtr>{a}, 'e');
+    auto out = std::make_shared<Value>(e, std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op]() {
@@ -113,7 +113,7 @@ ValuePtr vexp(const ValuePtr& a) {
 
 ValuePtr vlog(const ValuePtr& a) {
     auto out = std::make_shared<Value>(std::log(a->data),
-                                       std::vector<ValuePtr>{a}, 'l');
+                                       std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op]() {
@@ -124,7 +124,7 @@ ValuePtr vlog(const ValuePtr& a) {
 
 ValuePtr vtanh(const ValuePtr& a) {
     double t = std::tanh(a->data);
-    auto out = std::make_shared<Value>(t, std::vector<ValuePtr>{a}, 't');
+    auto out = std::make_shared<Value>(t, std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, t]() {
@@ -135,7 +135,7 @@ ValuePtr vtanh(const ValuePtr& a) {
 
 ValuePtr vrelu(const ValuePtr& a) {
     double r = a->data > 0.0 ? a->data : 0.0;
-    auto out = std::make_shared<Value>(r, std::vector<ValuePtr>{a}, 'r');
+    auto out = std::make_shared<Value>(r, std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op]() {
@@ -152,7 +152,7 @@ ValuePtr vgelu(const ValuePtr& a) {
     double inner = k0 * (x + k1 * x * x2);
     double t = std::tanh(inner);
     double out_val = 0.5 * x * (1.0 + t);
-    auto out = std::make_shared<Value>(out_val, std::vector<ValuePtr>{a}, 'g');
+    auto out = std::make_shared<Value>(out_val, std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     double dt_dx = (1.0 - t * t) * k0 * (1.0 + 3.0 * k1 * x2);
@@ -168,7 +168,7 @@ ValuePtr vsigmoid(const ValuePtr& a) {
     double s = x >= 0.0
         ? 1.0 / (1.0 + std::exp(-x))
         : std::exp(x) / (1.0 + std::exp(x));
-    auto out = std::make_shared<Value>(s, std::vector<ValuePtr>{a}, 'S');
+    auto out = std::make_shared<Value>(s, std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, s]() {
@@ -180,7 +180,7 @@ ValuePtr vsigmoid(const ValuePtr& a) {
 ValuePtr vabs(const ValuePtr& a) {
     double x = a->data;
     double sgn = x > 0.0 ? 1.0 : (x < 0.0 ? -1.0 : 0.0);
-    auto out = std::make_shared<Value>(std::fabs(x), std::vector<ValuePtr>{a}, 'A');
+    auto out = std::make_shared<Value>(std::fabs(x), std::vector<ValuePtr>{a});
     Value* ap = a.get();
     Value* op = out.get();
     out->backward_fn = [ap, op, sgn]() {
