@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as _dt
+import logging
 import os
 import re
 import sys
@@ -95,23 +96,44 @@ def load_patient_records(csv_path: str, patient: str, from_t_min: int):
         sys.exit(2)
 
     records = []
+    skipped = 0
     with open(csv_path, "r", newline="") as fh:
         reader = csv.DictReader(fh)
-        for row in reader:
+        # Row numbers are 1-indexed from the DictReader's first data row
+        # (the header is row 0). Emit them in warnings so the operator
+        # can locate a malformed row in the source CSV.
+        for row_no, row in enumerate(reader, start=1):
             if row["patient_id"] != patient:
                 continue
-            t_min = int(row["t_min"])
-            if t_min < from_t_min:
+            # A junk numeric cell on any one row used to crash the entire
+            # replay mid-stream. Now: log + skip + keep going. We catch
+            # only ValueError so genuine bugs (KeyError on a missing
+            # column, etc.) still surface.
+            try:
+                t_min = int(row["t_min"])
+                if t_min < from_t_min:
+                    continue
+                event = (row.get("event") or "").strip()
+                amount = row.get("amount") or ""
+                glucose = row.get("glucose") or ""
+                if event == "bolus":
+                    records.append((t_min, "b", float(amount)))
+                elif event == "meal":
+                    records.append((t_min, "m", float(amount)))
+                elif glucose:
+                    records.append((t_min, "g", float(glucose)))
+            except ValueError as exc:
+                skipped += 1
+                logging.warning(
+                    "replay_ohio: skipping malformed row %d (t_min=%r, "
+                    "event=%r, amount=%r, glucose=%r): %s",
+                    row_no, row.get("t_min"), row.get("event"),
+                    row.get("amount"), row.get("glucose"), exc)
                 continue
-            event = (row.get("event") or "").strip()
-            amount = row.get("amount") or ""
-            glucose = row.get("glucose") or ""
-            if event == "bolus":
-                records.append((t_min, "b", float(amount)))
-            elif event == "meal":
-                records.append((t_min, "m", float(amount)))
-            elif glucose:
-                records.append((t_min, "g", float(glucose)))
+    if skipped:
+        logging.warning(
+            "replay_ohio: %d row(s) skipped due to ValueError; "
+            "see preceding warnings for details.", skipped)
     records.sort(key=lambda r: (r[0], {"g": 2, "b": 0, "m": 1}[r[1]]))
     return records
 
@@ -135,6 +157,13 @@ def wait_for_banner(ser: serial.Serial, echo: bool, timeout_s: float = 5.0):
 
 def main() -> int:
     args = parse_args()
+    # Route warnings to stderr with a uniform prefix so a malformed CSV
+    # row produces a visible message instead of a silent skip.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(message)s",
+        stream=sys.stderr,
+    )
     records = load_patient_records(args.csv, args.patient, args.from_t_min)
     if not records:
         sys.stderr.write(
