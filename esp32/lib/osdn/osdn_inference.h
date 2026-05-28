@@ -56,7 +56,7 @@ static constexpr int N_LAYERS_MAX = 4;
 
 // Paper §4.2 constants — must match src/osdn.cpp.
 static constexpr float ETA = 0.003f;
-static constexpr float EPS = 1e-6f;
+static constexpr float OSDN_EPS = 1e-6f;
 
 struct OSDNLayerW {
     float Wk[K_MAX][H_MAX];
@@ -234,8 +234,8 @@ inline void osdn_step(const OSDNLayerW& lw, OSDNLayerS& ls,
     float dot_dk2 = 0.0f;
     for (int i = 0; i < K; ++i) dot_dk2 += ls.d[i] * k_sq[i];
     const float gate_term = 1.0f - beta * dot_dk2;
-    const float n_floor = (k_sqsum > EPS) ? (k_sqsum - EPS) : 0.0f;
-    const float norm = n_floor + EPS;
+    const float n_floor = (k_sqsum > OSDN_EPS) ? (k_sqsum - OSDN_EPS) : 0.0f;
+    const float norm = n_floor + OSDN_EPS;
     const float norm_inv = 1.0f / norm;
     const float scale = ETA * beta * gate_term * norm_inv;
     for (int i = 0; i < K; ++i) ls.d[i] += scale * k_sq[i];
