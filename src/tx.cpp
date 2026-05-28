@@ -1,6 +1,8 @@
 #include "tx.hpp"
 #include "loss.hpp"
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 static double xavier_limit(int fan_in, int fan_out) {
     return std::sqrt(6.0 / static_cast<double>(fan_in + fan_out));
@@ -42,8 +44,19 @@ std::vector<ValuePtr> LayerNorm::parameters() const {
     return p;
 }
 
+static int mha_check_dh(int d_model, int n_heads) {
+    if (n_heads <= 0 || d_model <= 0 || d_model % n_heads != 0) {
+        throw std::invalid_argument(
+            "MultiHeadAttention: d_model (" + std::to_string(d_model) +
+            ") must be a positive multiple of n_heads (" +
+            std::to_string(n_heads) + "); otherwise per-head dim would "
+            "silently truncate and drop dimensions");
+    }
+    return d_model / n_heads;
+}
+
 MultiHeadAttention::MultiHeadAttention(int d_model, int n_heads, std::mt19937& rng)
-    : d_(d_model), h_(n_heads), dh_(d_model / n_heads),
+    : d_(d_model), h_(n_heads), dh_(mha_check_dh(d_model, n_heads)),
       Wq_(d_model, std::vector<ValuePtr>(d_model)),
       Wk_(d_model, std::vector<ValuePtr>(d_model)),
       Wv_(d_model, std::vector<ValuePtr>(d_model)),
