@@ -65,7 +65,7 @@ $(GRAD_CHECK): $(GRAD_CHECK_SRC) src/value.hpp
 $(BLOB2H): $(BLOB2H_SRC)
 	$(CXX) $(CXXFLAGS) $(BLOB2H_SRC) -o $@ $(LDFLAGS)
 
-$(NORMSTATS): $(NORMSTATS_SRC) src/cgm_data.hpp
+$(NORMSTATS): $(NORMSTATS_SRC) src/cgm_data.hpp src/brain_config.h
 	$(CXX) $(DEMOFL) $(NORMSTATS_SRC) -o $@ $(LDFLAGS)
 
 check: $(CGM_INFTEST) $(FEATTEST) $(GRAD_CHECK)

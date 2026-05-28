@@ -17,6 +17,7 @@
 // Re-train of the brain-mode model with different flags must re-run
 // this tool; the gen header then updates in lock-step.
 
+#include "../src/brain_config.h"
 #include "../src/cgm_data.hpp"
 
 #include <cstdio>
@@ -27,18 +28,21 @@
 
 namespace {
 
-constexpr const char* CSV_PATH         = "data/ohio_t1dm.csv";
-constexpr int         LOOKBACK_STEPS   = 144;
-constexpr int         HORIZON_STEPS    = 12;
-constexpr int         STEP_MIN         = 5;
-constexpr double      HYPO_THRESHOLD   = 70.0;
-constexpr int         POST_BOLUS_MIN   = 240;
-constexpr int         WINDOW_STRIDE    = 12;
-constexpr std::uint32_t SEED           = 42;
-constexpr const char* VAL_IDS[]        = {"584", "588"};
-constexpr const char* TEST_IDS[]       = {"591", "596"};
-constexpr const char* OUT_JSON         = "results/norm_stats.json";
-constexpr const char* OUT_HEADER       = "esp32/src/osdn_norm_stats.gen.h";
+// Data pipeline + fold config is sourced from src/brain_config.h so the
+// brain-mode locked values live in one place.
+using brain_config::LOOKBACK_STEPS;
+using brain_config::HORIZON_STEPS;
+using brain_config::STEP_MIN;
+using brain_config::HYPO_THRESHOLD;
+using brain_config::POST_BOLUS_MIN;
+using brain_config::WINDOW_STRIDE;
+using brain_config::SEED;
+using brain_config::VAL_IDS;
+using brain_config::TEST_IDS;
+
+constexpr const char* CSV_PATH   = "data/ohio_t1dm.csv";
+constexpr const char* OUT_JSON   = "results/norm_stats.json";
+constexpr const char* OUT_HEADER = "esp32/src/osdn_norm_stats.gen.h";
 
 }  // namespace
 
