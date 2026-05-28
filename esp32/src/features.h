@@ -23,7 +23,7 @@
 namespace features {
 
 // Paper / dataset constants — must match src/cgm_data.cpp.
-constexpr double TWO_PI          = 6.283185307179586;
+constexpr double FEAT_TWO_PI     = 6.283185307179586;
 constexpr float  TAU_IOB         = 120.0f;   // minutes
 constexpr float  TAU_COB         =  90.0f;   // minutes
 constexpr float  IOB_SCALE       =   5.0f;

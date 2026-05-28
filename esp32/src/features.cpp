@@ -56,8 +56,8 @@ inline void compute_row(const float* g_ring, int g_head, int g_count,
     // signed; we mirror that.
     const std::int64_t tod  = ((step_t % 1440) + 1440) % 1440;
     const float tod_frac    = static_cast<float>(tod) / 1440.0f;
-    const float sin_tod     = std::sin(static_cast<float>(TWO_PI) * tod_frac);
-    const float cos_tod     = std::cos(static_cast<float>(TWO_PI) * tod_frac);
+    const float sin_tod     = std::sin(static_cast<float>(FEAT_TWO_PI) * tod_frac);
+    const float cos_tod     = std::cos(static_cast<float>(FEAT_TWO_PI) * tod_frac);
 
     // IOB / COB exponential-decay sums. Insertion-order walk, no early
     // break (ring is typically chronological but not guaranteed; see

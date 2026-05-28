@@ -33,7 +33,7 @@ void reference_window(const double* g_ring_dbl,
                       int           step_min,
                       std::uint32_t t_now_min,
                       double*       out_LxD) {
-    const double TWO_PI          = 6.283185307179586;
+    const double FEAT_TWO_PI     = 6.283185307179586;
     const double TAU_IOB         = 120.0;
     const double TAU_COB         =  90.0;
     const double IOB_SCALE       =   5.0;
@@ -67,8 +67,8 @@ void reference_window(const double* g_ring_dbl,
 
         const std::int64_t tod  = ((step_t % 1440) + 1440) % 1440;
         const double tod_frac    = static_cast<double>(tod) / 1440.0;
-        const double sin_tod     = std::sin(TWO_PI * tod_frac);
-        const double cos_tod     = std::cos(TWO_PI * tod_frac);
+        const double sin_tod     = std::sin(FEAT_TWO_PI * tod_frac);
+        const double cos_tod     = std::cos(FEAT_TWO_PI * tod_frac);
 
         double iob_acc = 0.0;
         for (int j = 0; j < iob_count; ++j) {
